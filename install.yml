@@ -1,0 +1,112 @@
+---
+- name: install maas
+  hosts: maas
+  become: true
+
+  vars:
+    MAAS_DBUSER: maas
+    MAAS_DBPASS: "{{ maas_dbpass | default( lookup('password', '~/.maas_dbpass') ) }}"
+    MAAS_DBNAME: maasdb
+
+  pre_tasks:
+    - include_vars: settings.yml
+
+    - name: install postgresql and python3-psycopg2
+      apt:
+        name:
+          - acl
+          - postgresql
+          - python3-psycopg2
+
+    - name: create postgres user
+      postgresql_user:
+        name: "{{ MAAS_DBUSER }}"
+        encrypted: true
+        password: "{{ MAAS_DBPASS }}"
+      become_user: postgres
+    - name: create postgres db
+      postgresql_db:
+        name: "{{ MAAS_DBNAME }}"
+        owner: "{{ MAAS_DBUSER }}"
+      become_user: postgres
+
+    - name: enable snapd proxy if we're not deploying to messy-maas
+      block:
+        - name: create /etc/systemd/system/snapd.service.d
+          file:
+            path: /etc/systemd/system/snapd.service.d
+            state: directory
+        - name: create snapd override.conf
+          copy:
+            content: |
+              [Service]
+              Environment=HTTP_PROXY=http://{{ hostvars['messy-maas'].ansible_host }}:8000 HTTPS_PROXY=http://{{ hostvars['messy-maas'].ansible_host }}:8000
+            dest: /etc/systemd/system/snapd.service.d/override.conf
+        - name: restart snapd.service
+          systemd:
+            daemon_reload: true
+            name: snapd
+            state: restarted
+      when: inventory_hostname != 'messy-maas'
+
+  tasks:
+    - name: install maas from snap
+      snap:
+        name: maas
+        channel: 2.9/beta
+
+    - block:
+        - name: maas status
+          command: maas status
+          register: _maas_status
+          failed_when:
+            - _maas_status.rc != 0
+            - _maas_status.rc != 3
+        - name: show maas status
+          debug:
+            var: _maas_status
+      rescue:
+        - name: rescue maas status
+          debug:
+            var: _maas_status
+        - name: init maas
+          command: maas init region+rack --database-uri \
+            "postgres://{{ MAAS_DBUSER }}:{{ MAAS_DBPASS }}@localhost/{{ MAAS_DBNAME }}" \
+            --maas-url http://{{ ansible_br_maas.ipv4.address | default( ansible_default_ipv4.address ) }}:5240/MAAS
+          register: _maas_init
+        - debug:
+            var: _maas_init
+
+    - block:
+        - name: get apikey for {{ maas_username }}
+          command: maas apikey --username {{ maas_username }}
+          register: _maas_apikey
+        - name: show maas apikey
+          debug:
+            var: _maas_apikey
+      rescue:
+        - name: rescue maas apikey
+          debug:
+            var: _maas_apikey
+        - name: maas createadmin {{ maas_username }}
+          command: maas createadmin \
+            --username {{ maas_username }} --password {{ maas_password | default( lookup('password', '~/.maas_' + maas_username + '_password') ) }}
+            --email {{ maas_email }}{% if inventory_hostname == 'messy-maas' %} --ssh-import {{ maas_ssh_import }}{% endif %}
+          register: _maas_createadmin
+        - debug:
+            var: _maas_createadmin
+        - name: get apikey for admin
+          command: maas apikey --username {{ maas_username }}
+          register: _maas_apikey
+
+    - name: write apikey headers
+      copy:
+        content: |
+          ---
+          oauth_consumer_key: {{ _maas_apikey.stdout.split( ':' )[0] }}
+          oauth_token: {{ _maas_apikey.stdout.split( ':' )[1] }}
+          oauth_signature: {{ _maas_apikey.stdout.split( ':' )[2] }}
+          Authorization: "OAuth oauth_consumer_key=\"{% raw %}{{ oauth_consumer_key }}{% endraw %}\", oauth_token=\"{% raw %}{{ oauth_token }}{% endraw %}\", oauth_signature=\"&{% raw %}{{ oauth_signature }}{% endraw %}\", oauth_timestamp=\"{% raw %}{{ lookup('pipe', 'date +%s') }}{% endraw %}\", oauth_nonce=\"{% raw %}{{ lookup('pipe', 'uuidgen') }}{% endraw %}\", oauth_version=\"1.0\", oauth_signature_method=\"PLAINTEXT\""
+        dest: settings.oauth.yml
+      delegate_to: localhost
+

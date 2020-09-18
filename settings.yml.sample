@@ -1,0 +1,5 @@
+---
+maas_base: http://192.168.3.1:5240
+maas_username: admin
+maas_email: admin@example.com
+maas_ssh_import: "lp:user-id"
