@@ -1,0 +1,56 @@
+---
+- name: install maas
+  hosts: maas
+  become: true
+
+  vars:
+  pre_tasks:
+    - include_vars: settings.yml
+    - include_vars: settings.oauth.yml
+    - name: create /var/snap/maas/current/root/.ssh
+      file:
+        path: /var/snap/maas/current/root/.ssh
+        state: directory
+
+    - name: install libvirt
+      apt:
+        name:
+          - libvirt-daemon-system
+
+  tasks:
+    - name: generate ssh-key
+      openssh_keypair:
+        type: ecdsa
+        size: 384
+        path: /var/snap/maas/current/root/.ssh/id_ecdsa
+      register: _id_ecdsa
+
+    - name: allow maas key at root
+      authorized_key:
+        user: root
+        key: "{{ _id_ecdsa.public_key }} {{ inventory_hostname }}"
+
+    - name: get pods
+      uri:
+        url: "{{ maas_base }}/MAAS/api/2.0/pods/"
+        headers:
+          Authorization: "{{ Authorization }}"
+        return_content: true
+      register: _maas_pods
+
+    - name: create pod
+      uri:
+        method: POST
+        url: "{{ maas_base }}/MAAS/api/2.0/pods/"
+        headers:
+          Authorization: "{{ Authorization }}"
+        body:
+          type: virsh
+          power_address: qemu+ssh://root@127.0.0.1/system
+          name: "{{ inventory_hostname }}"
+        body_format: json
+        return_content: true
+      changed_when: true
+      vars:
+        get_pod_names: "[].name"
+      when: inventory_hostname not in _maas_pods.json | json_query(get_pod_names)
