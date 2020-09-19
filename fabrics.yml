@@ -1,0 +1,35 @@
+---
+- name: Get MaaS Fabrics
+  uri:
+    url: "{{ maas_base }}/MAAS/api/2.0/fabrics/"
+    headers:
+      Authorization: "{{ Authorization }}"
+    return_content: true
+  register: _maas_fabrics
+  delegate_to: messy-maas
+
+- name: create fabrics
+  uri:
+    url: "{{ maas_base }}/MAAS/api/2.0/fabrics/"
+    headers:
+      Authorization: "{{ Authorization }}"
+    body:
+      name: "{{ fabric }}"
+    body_format: json
+    return_content: true
+  with_items: "{{ hostvars['messy-maas'].maas.fabrics }}"
+  loop_control:
+    loop_var: fabric
+  vars:
+    get_fabric_names: "[].name"
+  when:
+    - fabric not in (_maas_fabrics.json | json_query(get_fabric_names))
+  changed_when: true
+
+- include_tasks: fabric-vlans.yml
+  with_items: "{{ hostvars['messy-maas'].maas.fabrics }}"
+  loop_control:
+    loop_var: fabric
+  vars:
+    fabric_id: "{{ _maas_fabrics.json | json_query(get_fabric_id) }}"
+    get_fabric_id: "[?name=='{{ fabric }}'].id | [0]"

@@ -1,0 +1,15 @@
+---
+- name: Test MaaS API
+  hosts:
+    - localhost
+  gather_facts: false
+
+  vars:
+    machines: "{{ groups['maas'] }}"
+
+  pre_tasks:
+    - include_vars: settings.yml
+    - include_vars: settings.oauth.yml
+
+  tasks:
+    - include_tasks: fabrics.yml
