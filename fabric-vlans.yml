@@ -87,3 +87,71 @@
     get_subnet_cidrs: "[].cidr"
   changed_when: true
   delegate_to: messy-maas
+
+- name: get ip ranges
+  uri:
+    url: "{{ maas_base }}/MAAS/api/2.0/ipranges/"
+    headers:
+      Authorization: "{{ Authorization }}"
+    return_content: true
+  register: _ip_ranges
+  delegate_to: messy-maas
+
+# XXX this should get a better when condition
+#     I'm taking it for granted that there's only one range in a subnet.
+- name: create ip range
+  uri:
+    url: "{{ maas_base }}/MAAS/api/2.0/ipranges/"
+    method: POST
+    headers:
+      Authorization: "{{ Authorization }}"
+    body:
+      type: "{{ hostvars['messy-maas'].maas.fabrics[fabric][vlan].ip_range.type }}"
+      start_ip: "{{ hostvars['messy-maas'].maas.fabrics[fabric][vlan].ip_range.start_ip }}"
+      end_ip: "{{ hostvars['messy-maas'].maas.fabrics[fabric][vlan].ip_range.end_ip }}"
+      #subnet: "{{ hostvars['messy-maas'].maas.fabrics[fabric][vlan].subnet }}"
+    body_format: json
+    return_content: true
+  with_items: "{{ hostvars['messy-maas'].maas.fabrics[fabric] }}"
+  loop_control:
+    loop_var: vlan
+  when:
+    - hostvars['messy-maas'].maas.fabrics[fabric][vlan].ip_range is defined
+    - hostvars['messy-maas'].maas.fabrics[fabric][vlan].subnet not in (_ip_ranges.json | json_query(get_ip_range_cidrs))
+  vars:
+    get_ip_range_cidrs: "[].subnet.cidr"
+  changed_when: true
+  delegate_to: messy-maas
+
+- name: get rackcontrollers
+  uri:
+    url: "{{ maas_base }}/MAAS/api/2.0/rackcontrollers/"
+    headers:
+      Authorization: "{{ Authorization }}"
+    return_content: true
+  register: _rackcontrollers
+  delegate_to: messy-maas
+
+- name: provide dhcp on vlans
+  uri:
+    url: "{{ maas_base }}{{ _fabric_vlans.json | json_query(get_vlan_resource_uri) }}"
+    method: PUT
+    headers:
+      Authorization: "{{ Authorization }}"
+    body:
+      vid: "{{ vlan.split('.')[1] }}"
+      primary_rack: "{{ _rackcontrollers.json | json_query( \"[?hostname=='messy-maas'].system_id | [0]\" ) }}"
+      dhcp_on: "{{ hostvars['messy-maas'].maas.fabrics[fabric][vlan].dhcp_on }}"
+    body_format: json
+    return_content: true
+  with_items: "{{ hostvars['messy-maas'].maas.fabrics[fabric] }}"
+  loop_control:
+    loop_var: vlan
+  when:
+    - hostvars['messy-maas'].maas.fabrics[fabric][vlan].dhcp_on | default(false)
+    - not (_fabric_vlans.json | json_query(get_vlan_dhcp_on))
+  vars:
+    get_vlan_resource_uri: "[?vid==`{{ vlan.split('.')[1] }}`].resource_uri | [0]"
+    get_vlan_dhcp_on: "[?vid==`{{ vlan.split('.')[1] }}`].dhcp_on | [0]"
+  changed_when: true
+  delegate_to: messy-maas
