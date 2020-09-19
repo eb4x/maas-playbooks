@@ -62,39 +62,26 @@
           failed_when:
             - _maas_status.rc != 0
             - _maas_status.rc != 3
-        - name: show maas status
-          debug:
-            var: _maas_status
+
       rescue:
-        - name: rescue maas status
-          debug:
-            var: _maas_status
         - name: init maas
           command: maas init region+rack --database-uri \
             "postgres://{{ MAAS_DBUSER }}:{{ MAAS_DBPASS }}@localhost/{{ MAAS_DBNAME }}" \
             --maas-url http://{{ ansible_br_maas.ipv4.address | default( ansible_default_ipv4.address ) }}:5240/MAAS
           register: _maas_init
-        - debug:
-            var: _maas_init
 
     - block:
         - name: get apikey for {{ maas_username }}
           command: maas apikey --username {{ maas_username }}
           register: _maas_apikey
-        - name: show maas apikey
-          debug:
-            var: _maas_apikey
+
       rescue:
-        - name: rescue maas apikey
-          debug:
-            var: _maas_apikey
         - name: maas createadmin {{ maas_username }}
           command: maas createadmin \
             --username {{ maas_username }} --password {{ maas_password | default( lookup('password', '~/.maas_' + maas_username + '_password') ) }}
             --email {{ maas_email }}{% if inventory_hostname == 'messy-maas' %} --ssh-import {{ maas_ssh_import }}{% endif %}
           register: _maas_createadmin
-        - debug:
-            var: _maas_createadmin
+
         - name: get apikey for admin
           command: maas apikey --username {{ maas_username }}
           register: _maas_apikey
@@ -109,4 +96,3 @@
           Authorization: "OAuth oauth_consumer_key=\"{% raw %}{{ oauth_consumer_key }}{% endraw %}\", oauth_token=\"{% raw %}{{ oauth_token }}{% endraw %}\", oauth_signature=\"&{% raw %}{{ oauth_signature }}{% endraw %}\", oauth_timestamp=\"{% raw %}{{ lookup('pipe', 'date +%s') }}{% endraw %}\", oauth_nonce=\"{% raw %}{{ lookup('pipe', 'uuidgen') }}{% endraw %}\", oauth_version=\"1.0\", oauth_signature_method=\"PLAINTEXT\""
         dest: settings.oauth.yml
       delegate_to: localhost
-
