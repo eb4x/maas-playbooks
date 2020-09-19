@@ -6,6 +6,9 @@
 
   vars:
     machines: "{{ groups['maas'] }}"
+    maas_config_params:
+      - { name: kernel_opts, value: "console=tty1 console=ttyS0,115200n8" }
+      - { name: force_v1_network_yaml, value: false }
 
   pre_tasks:
     - include_vars: settings.yml
@@ -13,3 +16,32 @@
 
   tasks:
     - include_tasks: fabrics.yml
+
+    - name: get config
+      uri:
+        url: "{{ maas_base }}/MAAS/api/2.0/maas/?op=get_config&name={{ item.name }}"
+        headers:
+          Authorization: "{{ Authorization }}"
+        return_content: true
+      with_items: "{{ maas_config_params }}"
+      register: _maas_config
+      delegate_to: messy-maas
+
+    - debug:
+        var: _maas_config
+
+    - name: set config
+      uri:
+        url: "{{ maas_base }}/MAAS/api/2.0/maas/?op=set_config"
+        method: POST
+        headers:
+          Authorization: "{{ Authorization }}"
+        body:
+          name: "{{ item['name'] }}"
+          value: "{{ item['value'] }}"
+        body_format: json
+        return_content: true
+      with_items: "{{ maas_config_params }}"
+      #when: XXX TODO
+      register: _set_maas_config
+      delegate_to: messy-maas
