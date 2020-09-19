@@ -46,8 +46,6 @@
       mtu: "{{ hostvars['messy-maas'].maas.fabrics[fabric][vlan].mtu | default(1500) }}"
     body_format: json
     return_content: true
-#  debug:
-#    var: _fabric_vlans.json | json_query(get_vlan_name)
   with_items: "{{ hostvars['messy-maas'].maas.fabrics[fabric] }}"
   loop_control:
     loop_var: vlan
@@ -55,9 +53,9 @@
     - hostvars['messy-maas'].maas.fabrics[fabric][vlan].name != (_fabric_vlans.json | json_query(get_vlan_name)) or
       hostvars['messy-maas'].maas.fabrics[fabric][vlan].mtu | default(1500) != (_fabric_vlans.json | json_query(get_vlan_mtu))
   vars:
+    get_vlan_resource_uri: "[?vid==`{{ vlan.split('.')[1] }}`].resource_uri | [0]"
     get_vlan_name: "[?vid==`{{ vlan.split('.')[1] }}`].name | [0]"
     get_vlan_mtu: "[?vid==`{{ vlan.split('.')[1] }}`].mtu | [0]"
-    get_vlan_resource_uri: "[?vid==`{{ vlan.split('.')[1] }}`].resource_uri | [0]"
   changed_when: true
   delegate_to: messy-maas
 
