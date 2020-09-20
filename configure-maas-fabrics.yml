@@ -26,7 +26,7 @@
     - fabric not in (_maas_fabrics.json | json_query(get_fabric_names))
   changed_when: true
 
-- include_tasks: fabric-vlans.yml
+- include_tasks: configure-maas-fabric-vlans.yml
   with_items: "{{ hostvars['messy-maas'].maas.fabrics }}"
   loop_control:
     loop_var: fabric

@@ -14,7 +14,7 @@
     - include_vars: settings.oauth.yml
 
   tasks:
-    - include_tasks: fabrics.yml
+    - include_tasks: configure-maas-fabrics.yml
 
     - name: get config
       uri:
