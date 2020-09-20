@@ -1,9 +1,15 @@
 ---
-- name: install maas
+- name: configure kvm for maas
   hosts: maas
   become: true
 
   vars:
+    virt_nets:
+      - name: maas
+        iface: br-maas
+      - name: mgmt
+        iface: br-mgmt
+
   pre_tasks:
     - include_vars: settings.yml
     - include_vars: settings.oauth.yml
@@ -16,6 +22,30 @@
       apt:
         name:
           - libvirt-daemon-system
+          - python3-libvirt
+          - python3-lxml
+
+    - name: define libvirt networks
+      virt_net:
+        command: define
+        name: "{{ net.name }}"
+        xml: "{{ lookup('template', 'virt_net.xml.j2') }}"
+      with_items: "{{ virt_nets }}"
+      loop_control:
+        loop_var: net
+      register: _define
+
+    - name: create libvirt networks
+      virt_net:
+        command: create
+        name: "{{ item.name }}"
+      with_items: "{{ virt_nets }}"
+
+    - name: autostart libvirt networks
+      virt_net:
+        autostart: true
+        name: "{{ item.name }}"
+      with_items: "{{ virt_nets }}"
 
   tasks:
     - name: generate ssh-key
