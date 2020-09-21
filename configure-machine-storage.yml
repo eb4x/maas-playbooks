@@ -1,0 +1,79 @@
+---
+- name: "clear partitions on physicalblockdevice for {{ machine.hostname }}"
+  include_tasks: storage/clear_partitions.yml
+  with_items: "{{ hostvars[machine.hostname].lvm_volumes }}"
+  loop_control:
+    loop_var: blockdevice
+    label: "{{ blockdevice }}"
+  vars:
+    get_pbd: "[?name=='{{ blockdevice }}'] | [0]"
+    pbd: "{{ machine.physicalblockdevice_set | json_query(get_pbd) }}"
+  when:
+    - pbd.used_for != "LVM volume for {{ hostvars[machine.hostname].lvm_volumes[blockdevice].data_vg }}"
+    - pbd.used_for != "Unused"
+    - pbd.partitions | length > 0
+
+# We set the boot disk in some cases where maas picks the wrong bootdisk,
+# By setting this we avoid creating a partitioned device for volume_groups
+- include_tasks: storage/boot_disk.yml
+  when:
+    - hostvars[machine.hostname].boot_disk is defined
+
+- name: "create volume_groups on {{ machine.hostname }}"
+  uri:
+    url: "{{ maas_base }}/MAAS/api/2.0/nodes/{{ machine.system_id }}/volume-groups/"
+    method: POST
+    headers:
+      Authorization: "{{ Authorization }}"
+    body:
+      name: "{{ hostvars[machine.hostname].lvm_volumes[blockdevice].data_vg }}"
+      block_devices:
+        - "{{ pbd.id }}"
+    body_format: json
+    return_content: true
+  with_items: "{{ hostvars[machine.hostname].lvm_volumes }}"
+  loop_control:
+    loop_var: blockdevice
+  vars:
+    get_pbd: "[?name=='{{ blockdevice }}'] | [0]"
+    pbd: "{{ machine.physicalblockdevice_set | json_query(get_pbd) }}"
+  when:
+    - pbd.used_for != "LVM volume for {{ hostvars[machine.hostname].lvm_volumes[blockdevice].data_vg }}"
+
+##
+# Unfortunately, machine.volume_groups: [ { "__incomplete__": true, system_id: "", id: ""}, ... ]
+# is not really useful, so we call the api for volume-group details after we've created pv/vg
+##
+- name: get volume-groups
+  uri:
+    url: "{{ maas_base }}/MAAS/api/2.0/nodes/{{ machine.system_id }}/volume-groups/"
+    headers:
+      Authorization: "{{ Authorization }}"
+    return_content: true
+  register: _volume_groups
+
+- name: "create lvm_volumes on {{ machine.hostname }}"
+  uri:
+    url: "{{ maas_base }}{{ volume_group.resource_uri }}?op=create_logical_volume"
+    method: POST
+    headers:
+      Authorization: "{{ Authorization }}"
+    body:
+      name: "{{ hostvars[machine.hostname].lvm_volumes[blockdevice].data }}"
+      size: "{{ volume_group.available_size }}"
+    body_format: json
+    return_content: true
+  with_items: "{{ hostvars[machine.hostname].lvm_volumes }}"
+  loop_control:
+    loop_var: blockdevice
+    label: "{{ hostvars[machine.hostname].lvm_volumes[blockdevice].data }}"
+  vars:
+    get_volume_group: "[?name=='{{ hostvars[machine.hostname].lvm_volumes[blockdevice].data_vg }}'] | [0]"
+    volume_group: "{{ _volume_groups.json | json_query(get_volume_group) }}"
+  when:
+    - (volume_group.devices | length) == 1
+    - (volume_group.logical_volumes | length) == 0
+    - volume_group.available_size > 0
+  register: _data_vg
+
+# vim: nowrap

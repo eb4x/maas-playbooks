@@ -59,4 +59,14 @@
         - machine.status_name == "Ready"
         - hostvars[machine.hostname].network is defined
 
+    - name: "Create storage configuration for {{ machine.hostname }}"
+      include_tasks: configure-machine-storage.yml
+      with_items: "{{ _query_machines.json }}"
+      loop_control:
+        loop_var: machine
+        label: "{{ machine.hostname }}"
+      when:
+        - machine.status_name == "Ready"
+        - hostvars[machine.hostname].lvm_volumes is defined
+
 # vim: nowrap
