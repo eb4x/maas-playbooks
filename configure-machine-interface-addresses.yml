@@ -1,0 +1,133 @@
+---
+- name: Clear variables we build with set_fact between machines
+  set_fact:
+    netplan_interfaces: []
+    addressable_interfaces: []
+
+- name: "create a list of all netplan interfaces on {{ machine.hostname }}"
+  set_fact:
+    netplan_interfaces: "{{ netplan_interfaces | default([]) + (hostvars[machine.hostname].network[collection] | dict2items) }}"
+  with_items:
+    - ethernets
+    - bonds
+    - vlans
+    - bridges
+  loop_control:
+    loop_var: collection
+    label: "{{ machine.hostname }} - {{ collection }}"
+  when:
+    - hostvars[machine.hostname].network[collection] is defined
+
+# Note we catch "set-name" and default back to key if it's not there.
+- name: "create a list of all netplan interfaces with addresses on {{ machine.hostname }}"
+  set_fact:
+    addressable_interfaces: "{{ addressable_interfaces | default([]) + [{ 'name': np_interface.value['set-name'] | default(np_interface.key), 'addresses': np_interface.value.addresses }] }}"
+  with_items: "{{ netplan_interfaces }}"
+  loop_control:
+    loop_var: np_interface
+    label: "{{ machine.hostname }} - {{ np_interface.key }}"
+  when:
+    - np_interface.value.addresses is defined
+
+- debug:
+    var: machine_interface_set
+
+#- debug:
+#    var: netplan_interfaces
+
+#- debug:
+#    var: addressable_interfaces
+
+##
+# APPLY IP ADDRESSES
+##
+
+# XXX fix ~ '/24'
+#- debug:
+#    # var: machine_interface_set
+#    # var: machine_interface_set | json_query(interface_resource_uri)
+#    # var: machine_interface_set | json_query(interface_links) | length
+#    # var: machine_interface_set | json_query(interface_link_id)
+#    # var: machine_interface_set | json_query(interface_link_mode)
+#    # var: machine_interface_set | json_query(interface_link_ip_address)
+#    # var: (machine_interface_set | json_query(interface_details)).resource_uri
+#    var: (machine_interface_set | json_query(interface_details)).ip_address ~ '/' ~ (machine_interface_set | json_query(interface_details)).cidr.split('/')[1]
+#  with_items: "{{ addressable_interfaces }}"
+#  loop_control:
+#    loop_var: np_interface
+#    label: "{{ machine.hostname }} - {{ np_interface.name }} - {{ np_interface.addresses[0] }}"
+#  vars:
+#    interface:                 "[?name=='{{ np_interface.name }}'] | [0]"
+#    interface_resource_uri:    "[?name=='{{ np_interface.name }}'].resource_uri | [0]"
+#    interface_links:           "[?name=='{{ np_interface.name }}'].links"
+#    interface_link_id:         "[?name=='{{ np_interface.name }}'].links[0].id | [0]"
+#    interface_link_mode:       "[?name=='{{ np_interface.name }}'].links[0].mode | [0]"
+#    interface_link_ip_address: "[?name=='{{ np_interface.name }}'].links[0].ip_address | [0]"
+#    interface_details: "[?name=='{{ np_interface.name }}'].{ name: name, resource_uri: resource_uri, ip_address: links[0].ip_address, cidr: links[0].subnet.cidr } | [0]"
+#  when:
+#    - machine_interface_set | json_query(interface_links) | length > 0
+#    - (machine_interface_set | json_query(interface_link_ip_address) ~ '/24') not in np_interface.addresses
+#    - machine_interface_set | json_query(interface_link_mode) in ['auto', 'static']
+
+#- name: "unlink interfaces with links but wrong ip_address on {{ machine.hostname }}"
+#  #uri:
+#  debug:
+#    var: machine_interface_set
+#  when:
+#    - interface has address
+#    - interface not in addressable_interfaces
+#    - interface_ip not int addressable_interfaces
+#- fail:
+
+# XXX fix ~ '/24'
+#- name: "unlink interfaces with links but wrong ip_address on {{ machine.hostname }}"
+#  uri:
+#    url: "{{ maas_base }}{{ machine_interface_set | json_query(interface_resource_uri) }}?op=unlink_subnet"
+#    method: POST
+#    headers:
+#      Authorization: "{{ Authorization }}"
+#    body:
+#       id: "{{ machine_interface_set | json_query(interface_link_id) }}"
+#    body_format: json
+#    return_content: true
+#  with_items: "{{ addressable_interfaces }}"
+#  loop_control:
+#    loop_var: np_interface
+#    label: "{{ machine.hostname }} - {{ np_interface.name }}"
+#  vars:
+#    interface_resource_uri:    "[?name=='{{ np_interface.name }}'].resource_uri | [0]"
+#    interface_links:           "[?name=='{{ np_interface.name }}'].links"
+#    interface_link_id:         "[?name=='{{ np_interface.name }}'].links[0].id | [0]"
+#    interface_link_mode:       "[?name=='{{ np_interface.name }}'].links[0].mode | [0]"
+#    interface_link_ip_address: "[?name=='{{ np_interface.name }}'].links[0].ip_address | [0]"
+#  when:
+#    - machine_interface_set | json_query(interface_links) | length > 0
+#    - (machine_interface_set | json_query(interface_link_ip_address) ~ '/24')  not in np_interface.addresses
+#    - machine_interface_set | json_query(interface_link_mode) in ['auto', 'static']
+#  register: _interface_update
+#
+
+- name: "set static ip for interfaces on {{ machine.hostname }}"
+  uri:
+    url: "{{ maas_base }}{{ machine_interface_set | json_query(interface_resource_uri) }}/?op=link_subnet"
+    method: POST
+    headers:
+      Authorization: "{{ Authorization }}"
+    body:
+       mode: STATIC
+       subnet: "{{ _maas_subnets.json | json_query(subnet_id_for_interface_address) }}"
+       ip_address: "{{ np_interface.addresses[0] | ipaddr('address') }}"
+    body_format: json
+    return_content: true
+  with_items: "{{ addressable_interfaces }}"
+  loop_control:
+    loop_var: np_interface
+    label: "{{ machine.hostname }} - {{ np_interface.name }} - {{ np_interface.addresses[0] }}"
+  when:
+    - np_interface.addresses[0] | ipaddr('address') != machine_interface_set | json_query(interface_link_ip_address)
+  vars:
+    interface_resource_uri:    "[?name=='{{ np_interface.name }}'].resource_uri | [0]"
+    interface_link_ip_address: "[?name=='{{ np_interface.name }}'].links[0].ip_address | [0]"
+    subnet_id_for_interface_address: "[?cidr=='{{ np_interface.addresses[0] | ipaddr('network/prefix') }}'].id | [0]"
+  register: _interface_update
+  changed_when: true

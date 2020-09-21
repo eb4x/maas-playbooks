@@ -1,0 +1,49 @@
+---
+#- debug:
+#    var: machine_interface_set | map(attribute='name') | list
+#
+#- debug:
+#    var: maas_fabrics['physnet1'].vlans | json_query(get_vlan_id)
+#  with_items: "{{ hostvars[machine.hostname].network.vlans }}"
+#  loop_control:
+#    loop_var: vlan
+#    label: "{{ machine.hostname }} - {{ vlan.split('.')[1] }}"
+#  vars:
+#    get_vlan_id: "[?vid==to_number('{{ vlan.split('.')[1] }}')].id | [0]"
+#  when:
+#    - vlan not in (machine_interface_set | map(attribute='name') | list)
+#
+#- debug:
+#    var: interface_id
+
+- name: "create vlans on {{ machine.hostname }}"
+  uri:
+    url: "{{ maas_base }}/MAAS/api/2.0/nodes/{{ machine.system_id }}/interfaces/?op=create_vlan"
+    method: POST
+    headers:
+      Authorization: "{{ Authorization }}"
+    body:
+      vlan: "{{ maas_fabrics['fabric-0'].vlans | json_query(get_vlan_id) }}"
+      parents: "{{ interface_id[vlan.split('.')[0]] }}"
+    body_format: json
+    return_content: true
+  with_items: "{{ hostvars[machine.hostname].network.vlans }}"
+  loop_control:
+    loop_var: vlan
+  when:
+    - vlan not in (machine_interface_set | map(attribute='name') | list)
+  vars:
+    get_vlan_id: "[?vid==`{{ vlan.split('.')[1] }}`].id | [0]"
+  register: _create_vlans
+  changed_when: true
+  
+- name: "update machine_interface_set for {{ machine.hostname}} with new vlans"
+  set_fact:
+    machine_interface_set: "{{ machine_interface_set + [item.json] }}"
+    interface_id: "{{ interface_id | combine({ item.json.name: item.json.id }) }}"
+  with_items: "{{ _create_vlans.results }}"
+  loop_control:
+    label: "{{ item.vlan }}"
+  when:
+    - item.json is defined
+  changed_when: true

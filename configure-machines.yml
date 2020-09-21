@@ -1,0 +1,62 @@
+---
+- name: configure machines via api
+  hosts:
+    - messy-maas
+  gather_facts: false
+
+  vars:
+    machines: "{{ groups['openstack'] }}"
+
+  pre_tasks:
+    - include_vars: settings.yml
+    - include_vars: settings.oauth.yml
+
+#    - package:
+#        name: "{{ item }}"
+#      with_items: [ "python3-jmespath", "python3-netaddr" ]
+#      become: true
+
+    - name: Get MaaS Fabrics
+      uri:
+        url: "{{ maas_base }}/MAAS/api/2.0/fabrics/"
+        headers:
+          Authorization: "{{ Authorization }}"
+        return_content: true
+      register: _maas_fabrics
+
+    - name: Create a dictionary for fabrics
+      set_fact:
+        maas_fabrics: "{{ ( maas_fabrics | default({}) ) | combine({ fabric.name: fabric }) }}"
+      with_items: "{{ _maas_fabrics.json }}"
+      loop_control:
+        loop_var: fabric
+        label: "{{ fabric.name }}"
+
+    - name: Get MaaS subnets
+      uri:
+        url: "{{ maas_base }}/MAAS/api/2.0/subnets/"
+        headers:
+          Authorization: "{{ Authorization }}"
+        return_content: true
+      register: _maas_subnets
+
+    - name: "Query {{ machines }}"
+      uri:
+        url: "{{ maas_base }}/MAAS/api/2.0/machines/?{% for hostname in machines %}hostname={{ hostname }}{% if not loop.last %}&{% endif %}{% endfor %}"
+        headers:
+          Authorization: "{{ Authorization }}"
+        return_content: true
+      register: _query_machines
+
+  tasks:
+    - name: "Create interface configuration for {{ machine.hostname }}"
+      include_tasks: configure-machine-interfaces.yml
+      with_items: "{{ _query_machines.json }}"
+      loop_control:
+        loop_var: machine
+        label: "{{ machine.hostname }}"
+      when:
+        - machine.status_name == "Ready"
+        - hostvars[machine.hostname].network is defined
+
+# vim: nowrap

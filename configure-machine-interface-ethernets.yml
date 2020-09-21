@@ -1,0 +1,67 @@
+---
+##
+# RENAME THE ETHERNETS
+#
+# The interfaces without parents are the ones we want to rename,
+# any other interfaces we create later on.
+##
+
+- block:
+    - name: "rename ethernets on {{ machine.hostname }} from match.macaddress"
+      uri:
+        url: "{{ maas_base }}/{{ machine_interface_set | json_query(parentless_interface_mac2uri) }}"
+        method: PUT
+        headers:
+          Authorization: "{{ Authorization }}"
+        body:
+          name: "{{ hostvars[machine.hostname].network.ethernets[ethernet]['set-name'] }}"
+        body_format: json
+        return_content: true
+      with_items: "{{ hostvars[machine.hostname].network.ethernets }}"
+      loop_control:
+        loop_var: ethernet
+        label: "{{ machine.hostname }} - {{ ethernet }} -> {{ hostvars[machine.hostname].network.ethernets[ethernet]['set-name'] }}"
+      when:
+        - hostvars[machine.hostname].network.ethernets[ethernet]['set-name'] is defined
+        - hostvars[machine.hostname].network.ethernets[ethernet]['set-name'] != machine_interface_set | json_query(parentless_interface_mac2name)
+      vars:
+        parentless_interface_mac2uri: "[?mac_address=='{{ hostvars[machine.hostname].network.ethernets[ethernet].match.macaddress }}' && parents==`[]`].resource_uri | [0]"
+        parentless_interface_mac2name: "[?mac_address=='{{ hostvars[machine.hostname].network.ethernets[ethernet].match.macaddress }}' && parents==`[]`].name | [0]"
+      #register: _rename_ethernets
+      changed_when: true
+  rescue:
+    - name: "rename ethernets on {{ machine.hostname }} from interface name"
+      uri:
+        url: "{{ maas_base }}/{{ machine_interface_set | json_query(parentless_interface_name2uri) }}"
+        method: PUT
+        headers:
+          Authorization: "{{ Authorization }}"
+        body:
+          name: "{{ hostvars[machine.hostname].network.ethernets[ethernet]['set-name'] }}"
+        body_format: json
+        return_content: true
+      with_items: "{{ hostvars[machine.hostname].network.ethernets }}"
+      loop_control:
+        loop_var: ethernet
+        label: "{{ machine.hostname }} - {{ ethernet }} -> {{ hostvars[machine.hostname].network.ethernets[ethernet]['set-name'] }}"
+      when:
+        - hostvars[machine.hostname].network.ethernets[ethernet]['set-name'] is defined
+        - hostvars[machine.hostname].network.ethernets[ethernet]['set-name'] not in machine_interface_set | json_query(parentless_interfaces)
+      vars:
+        parentless_interface_name2uri: "[?name=='{{ ethernet }}' && parents==`[]`].resource_uri | [0]"
+        parentless_interfaces: "[?parents==`[]`].name"
+      #register: _rename_ethernets
+      changed_when: true
+  always:
+    - name: "GET interfaces for {{ machine.hostname }}"
+      uri:
+        url: "{{ maas_base }}/MAAS/api/2.0/nodes/{{ machine.system_id }}/interfaces/"
+        headers:
+          Authorization: "{{ Authorization }}"
+        return_content: true
+      register: _machine_interfaces
+
+    - name: "update machine_interface_set and interface_id facts for {{ machine.hostname }}"
+      set_fact:
+        machine_interface_set: "{{ _machine_interfaces.json }}"
+        interface_id: "{{ _machine_interfaces.json | items2dict(key_name='name', value_name='id') }}"

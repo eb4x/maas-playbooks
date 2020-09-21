@@ -1,0 +1,25 @@
+---
+
+#
+# We can't manipulate anything in the {{ machine }} fact that gets passed in,
+# so we make a copy of {{ machine.interface_set }} into a variable that we can
+# then modify as we apply things via the maas rest api
+#
+
+- name: "set machine_interface_set and interface_id facts for {{ machine.hostname }}"
+  set_fact:
+    machine_interface_set: "{{ machine.interface_set }}"
+    interface_id: "{{ machine.interface_set | items2dict(key_name='name', value_name='id') }}"
+
+- include_tasks: configure-machine-interface-ethernets.yml
+  when: hostvars[machine.hostname].network.ethernets is defined
+- include_tasks: configure-machine-interface-bonds.yml
+  when: hostvars[machine.hostname].network.bonds is defined
+- include_tasks: configure-machine-interface-vlans.yml
+  when: hostvars[machine.hostname].network.vlans is defined
+- include_tasks: configure-machine-interface-bridges.yml
+  when: hostvars[machine.hostname].network.bridges is defined
+
+- include_tasks: configure-machine-interface-addresses.yml
+
+# vim: nowrap
