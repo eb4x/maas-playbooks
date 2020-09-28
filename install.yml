@@ -30,25 +30,6 @@
         owner: "{{ MAAS_DBUSER }}"
       become_user: postgres
 
-    - name: enable snapd proxy if we're not deploying to messy-maas
-      block:
-        - name: create /etc/systemd/system/snapd.service.d
-          file:
-            path: /etc/systemd/system/snapd.service.d
-            state: directory
-        - name: create snapd override.conf
-          copy:
-            content: |
-              [Service]
-              Environment=HTTP_PROXY=http://{{ hostvars['messy-maas'].ansible_host }}:8000 HTTPS_PROXY=http://{{ hostvars['messy-maas'].ansible_host }}:8000
-            dest: /etc/systemd/system/snapd.service.d/override.conf
-        - name: restart snapd.service
-          systemd:
-            daemon_reload: true
-            name: snapd
-            state: restarted
-      when: inventory_hostname != 'messy-maas'
-
   tasks:
     - name: install maas from snap
       snap:
@@ -79,10 +60,10 @@
         - name: maas createadmin {{ maas_username }}
           command: maas createadmin \
             --username {{ maas_username }} --password {{ maas_password | default( lookup('password', '~/.maas_' + maas_username + '_password') ) }}
-            --email {{ maas_email }}{% if inventory_hostname == 'messy-maas' %} --ssh-import {{ maas_ssh_import }}{% endif %}
+            --email {{ maas_email }} --ssh-import {{ maas_ssh_import }}
           register: _maas_createadmin
 
-        - name: get apikey for admin
+        - name: rescue get apikey for {{ maas_username }}
           command: maas apikey --username {{ maas_username }}
           register: _maas_apikey
 
