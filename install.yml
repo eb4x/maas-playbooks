@@ -30,6 +30,12 @@
         owner: "{{ MAAS_DBUSER }}"
       become_user: postgres
 
+    - name: fix getaddrinfo for maas-proxy
+      lineinfile:
+        path: /etc/gai.conf
+        regexp: "^#\\s*precedence\\s+::ffff:0:0/96\\s+100$"
+        line: "precedence ::ffff:0:0/96  100"
+
   tasks:
     - name: install maas from snap
       snap:
