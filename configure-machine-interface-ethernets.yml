@@ -4,6 +4,8 @@
 #
 # The interfaces without parents are the ones we want to rename,
 # any other interfaces we create later on.
+#
+# Also, maas doesn't pay attention to lldp data yet.
 ##
 
 - block:
@@ -29,6 +31,31 @@
         parentless_interface_mac2name: "[?mac_address=='{{ hostvars[machine.hostname].network.ethernets[ethernet].match.macaddress }}' && parents==`[]`].name | [0]"
       #register: _rename_ethernets
       changed_when: true
+
+    # XXX report bug
+    - name: update native_vlan while maas is lazy with lldp
+      uri:
+        url: "{{ maas_base }}/{{ machine_interface_set | json_query(parentless_interface_mac2uri) }}"
+        method: PUT
+        headers:
+          Authorization: "{{ Authorization }}"
+        body:
+          vlan: "{{ maas_fabrics['fabric-0'].vlans | json_query(get_vlan_id) }}"
+          link_connected: true
+        body_format: json
+        return_content: true
+      with_items: "{{ hostvars[machine.hostname].network.ethernets }}"
+      loop_control:
+        loop_var: ethernet
+        label: "{{ machine.hostname }} - {{ ethernet }} -> {{ hostvars[machine.hostname].network.ethernets[ethernet]['set-name'] }}"
+      when:
+        - hostvars[machine.hostname].network.ethernets[ethernet].native_vlan is defined
+      vars:
+        parentless_interface_mac2uri: "[?mac_address=='{{ hostvars[machine.hostname].network.ethernets[ethernet].match.macaddress }}' && parents==`[]`].resource_uri | [0]"
+        parentless_interface_mac2vlan: "[?mac_address=='{{ hostvars[machine.hostname].network.ethernets[ethernet].match.macaddress }}' && parents==`[]`].vlan | [0]"
+        get_vlan_id: "[?vid==`{{ hostvars[machine.hostname].network.ethernets[ethernet].native_vlan }}`].id | [0]"
+      changed_when: true
+
   rescue:
     - name: "rename ethernets on {{ machine.hostname }} from interface name"
       uri:
@@ -52,6 +79,31 @@
         parentless_interfaces: "[?parents==`[]`].name"
       #register: _rename_ethernets
       changed_when: true
+
+    # XXX report bug
+    - name: update native_vlan while maas is lazy with lldp
+      uri:
+        url: "{{ maas_base }}/{{ machine_interface_set | json_query(parentless_interface_mac2uri) }}"
+        method: PUT
+        headers:
+          Authorization: "{{ Authorization }}"
+        body:
+          vlan: "{{ maas_fabrics['fabric-0'].vlans | json_query(get_vlan_id) }}"
+          link_connected: true
+        body_format: json
+        return_content: true
+      with_items: "{{ hostvars[machine.hostname].network.ethernets }}"
+      loop_control:
+        loop_var: ethernet
+        label: "{{ machine.hostname }} - {{ ethernet }} -> {{ hostvars[machine.hostname].network.ethernets[ethernet]['set-name'] }}"
+      when:
+        - hostvars[machine.hostname].network.ethernets[ethernet].native_vlan is defined
+      vars:
+        parentless_interface_name2uri: "[?name=='{{ ethernet }}' && parents==`[]`].resource_uri | [0]"
+        parentless_interface_name2vlan: "[?name=='{{ ethernet }}' && parents==`[]`].vlan | [0]"
+        get_vlan_id: "[?vid==`{{ hostvars[machine.hostname].network.ethernets[ethernet].native_vlan }}`].id | [0]"
+      changed_when: true
+
   always:
     - name: "GET interfaces for {{ machine.hostname }}"
       uri:
