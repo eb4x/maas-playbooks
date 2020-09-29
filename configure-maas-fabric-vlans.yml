@@ -12,7 +12,7 @@
   debug:
     var: _fabric_vlans.json
 
-- name: create vlans
+- name: create missing vlans
   uri:
     url: "{{ maas_base }}/MAAS/api/2.0/fabrics/{{ fabric_id }}/vlans/"
     method: POST
@@ -38,7 +38,7 @@
 - debug:
     var: _create_vlans
 
-- name: update vlans
+- name: update existing vlans
   uri:
     url: "{{ maas_base }}{{ _fabric_vlans.json | json_query(get_vlan_resource_uri) }}"
     method: PUT
@@ -54,14 +54,14 @@
   loop_control:
     loop_var: vlan
   when:
+    - vlan not in (_create_vlans.results | json_query(get_created_vlans))
     - hostvars['messy-maas'].maas.fabrics[fabric][vlan].name != (_fabric_vlans.json | json_query(get_vlan_name)) or
       hostvars['messy-maas'].maas.fabrics[fabric][vlan].mtu | default(1500) != (_fabric_vlans.json | json_query(get_vlan_mtu))
-    - hostvars['messy-maas'].maas.fabrics[fabric][vlan].name not in (_create_vlans.results | json_query(get_created_vlans))
   vars:
     get_vlan_resource_uri: "[?vid==`{{ vlan.split('.')[1] }}`].resource_uri | [0]"
     get_vlan_name: "[?vid==`{{ vlan.split('.')[1] }}`].name | [0]"
     get_vlan_mtu: "[?vid==`{{ vlan.split('.')[1] }}`].mtu | [0]"
-    get_created_vlans: "[].name" # XXX FIXME!
+    get_created_vlans: "[?changed==`true`].vlan"
   changed_when: true
   delegate_to: messy-maas
 
@@ -88,7 +88,9 @@
   with_items: "{{ hostvars['messy-maas'].maas.fabrics[fabric] }}"
   loop_control:
     loop_var: vlan
-  when: hostvars['messy-maas'].maas.fabrics[fabric][vlan].subnet not in _subnets.json | json_query(get_subnet_cidrs)
+  when:
+    - hostvars['messy-maas'].maas.fabrics[fabric][vlan].subnet is defined
+    - hostvars['messy-maas'].maas.fabrics[fabric][vlan].subnet not in _subnets.json | json_query(get_subnet_cidrs)
   vars:
     get_subnet_cidrs: "[].cidr"
   changed_when: true
