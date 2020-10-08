@@ -58,7 +58,7 @@
     - name: allow maas key at root
       authorized_key:
         user: root
-        key: "{{ _id_ecdsa.public_key }} {{ inventory_hostname }}"
+        key: "{{ _id_ecdsa.public_key }} maas@{{ inventory_hostname }}"
 
     - name: get pods
       uri:
