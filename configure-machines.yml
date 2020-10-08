@@ -5,7 +5,7 @@
   gather_facts: false
 
   vars:
-    machines: "{{ groups['openstack'] }}"
+    machines: "{{ groups['openstack'] + groups['openstack_ansible'] }}"
 
   pre_tasks:
     - include_vars: settings.yml
