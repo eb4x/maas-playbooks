@@ -40,7 +40,7 @@
     - name: install maas from snap
       snap:
         name: maas
-        channel: 2.9/beta
+        channel: 2.8/stable
 
     - block:
         - name: maas status
