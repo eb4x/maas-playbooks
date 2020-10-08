@@ -13,8 +13,6 @@
 #  when:
 #    - vlan not in (machine_interface_set | map(attribute='name') | list)
 #
-#- debug:
-#    var: interface_id
 
 - name: "create vlans on {{ machine.hostname }}"
   uri:
@@ -24,7 +22,7 @@
       Authorization: "{{ Authorization }}"
     body:
       vlan: "{{ maas_fabrics['fabric-0'].vlans | json_query(get_vlan_id) }}"
-      parents: "{{ interface_id[vlan.split('.')[0]] }}"
+      parent: "{{ interface_id[vlan.split('.')[0]] }}"
     body_format: json
     return_content: true
   with_items: "{{ hostvars[machine.hostname].network.vlans }}"
@@ -37,7 +35,7 @@
   register: _create_vlans
   changed_when: true
   
-- name: "update machine_interface_set for {{ machine.hostname}} with new vlans"
+- name: "update machine_interface_set for {{ machine.hostname }} with new vlans"
   set_fact:
     machine_interface_set: "{{ machine_interface_set + [item.json] }}"
     interface_id: "{{ interface_id | combine({ item.json.name: item.json.id }) }}"
