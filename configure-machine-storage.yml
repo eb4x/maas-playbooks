@@ -9,7 +9,7 @@
     get_pbd: "[?name=='{{ blockdevice }}'] | [0]"
     pbd: "{{ machine.physicalblockdevice_set | json_query(get_pbd) }}"
   when:
-    - pbd.used_for != "LVM volume for {{ hostvars[machine.hostname].lvm_volumes[blockdevice].data_vg }}"
+    - pbd.used_for != "LVM volume for " ~ hostvars[machine.hostname].lvm_volumes[blockdevice].data_vg
     - pbd.used_for != "Unused"
     - pbd.partitions | length > 0
 
@@ -38,7 +38,7 @@
     get_pbd: "[?name=='{{ blockdevice }}'] | [0]"
     pbd: "{{ machine.physicalblockdevice_set | json_query(get_pbd) }}"
   when:
-    - pbd.used_for != "LVM volume for {{ hostvars[machine.hostname].lvm_volumes[blockdevice].data_vg }}"
+    - pbd.used_for != "LVM volume for " ~ hostvars[machine.hostname].lvm_volumes[blockdevice].data_vg
 
 ##
 # Unfortunately, machine.volume_groups: [ { "__incomplete__": true, system_id: "", id: ""}, ... ]
