@@ -3,11 +3,6 @@
   hosts: maas
   become: true
 
-  vars:
-    MAAS_DBUSER: maas
-    MAAS_DBPASS: "{{ maas_dbpass | default( lookup('password', '~/.maas_dbpass') ) }}"
-    MAAS_DBNAME: maasdb
-
   pre_tasks:
     - include_vars: settings.yml
 
@@ -18,18 +13,6 @@
           - postgresql
           - python3-psycopg2
 
-    - name: create postgres user
-      postgresql_user:
-        name: "{{ MAAS_DBUSER }}"
-        encrypted: true
-        password: "{{ MAAS_DBPASS }}"
-      become_user: postgres
-    - name: create postgres db
-      postgresql_db:
-        name: "{{ MAAS_DBNAME }}"
-        owner: "{{ MAAS_DBUSER }}"
-      become_user: postgres
-
     - name: fix getaddrinfo for maas-proxy
       lineinfile:
         path: /etc/gai.conf
@@ -37,25 +20,14 @@
         line: "precedence ::ffff:0:0/96  100"
 
   tasks:
-    - name: install maas from snap
-      snap:
+    - name: add ppa repository
+      apt_repository:
+        repo: ppa:maas/3.1
+
+    - name: install maas
+      package:
         name: maas
-        channel: 2.8/stable
-
-    - block:
-        - name: maas status
-          command: maas status
-          register: _maas_status
-          failed_when:
-            - _maas_status.rc != 0
-            - _maas_status.rc != 3
-
-      rescue:
-        - name: init maas
-          command: maas init region+rack --database-uri \
-            "postgres://{{ MAAS_DBUSER }}:{{ MAAS_DBPASS }}@localhost/{{ MAAS_DBNAME }}" \
-            --maas-url http://{{ ansible_br_maas.ipv4.address | default( ansible_default_ipv4.address ) }}:5240/MAAS
-          register: _maas_init
+        state: latest
 
     - block:
         - name: get apikey for {{ maas_username }}
@@ -82,4 +54,5 @@
           oauth_signature: {{ _maas_apikey.stdout.split( ':' )[2] }}
           Authorization: "OAuth oauth_consumer_key=\"{% raw %}{{ oauth_consumer_key }}{% endraw %}\", oauth_token=\"{% raw %}{{ oauth_token }}{% endraw %}\", oauth_signature=\"&{% raw %}{{ oauth_signature }}{% endraw %}\", oauth_timestamp=\"{% raw %}{{ lookup('pipe', 'date +%s') }}{% endraw %}\", oauth_nonce=\"{% raw %}{{ lookup('pipe', 'uuidgen') }}{% endraw %}\", oauth_version=\"1.0\", oauth_signature_method=\"PLAINTEXT\""
         dest: settings.oauth.yml
+      become: false
       delegate_to: localhost
