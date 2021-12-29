@@ -8,6 +8,7 @@
     maas_config_params:
       - { name: kernel_opts, value: "console=tty1 console=ttyS0,115200n8" }
       - { name: force_v1_network_yaml, value: false }
+      - { name: network_discovery, value: disabled }
 
   pre_tasks:
     - include_vars: settings.yml
