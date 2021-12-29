@@ -24,6 +24,8 @@
           Authorization: "{{ Authorization }}"
         return_content: true
       with_items: "{{ maas_config_params }}"
+      loop_control:
+        label: "{{ item.name }}"
       register: _maas_config
       delegate_to: messy-maas
 
@@ -39,6 +41,8 @@
         body_format: json
         return_content: true
       with_items: "{{ maas_config_params }}"
+      loop_control:
+        label: "{{ item.name }}"
       when: (_maas_config.results | json_query(content) | from_json != item.value)
       vars:
         content: "[?item.name=='{{ item.name }}'].content | [0]"
