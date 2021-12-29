@@ -13,10 +13,12 @@
   pre_tasks:
     - include_vars: settings.yml
     - include_vars: settings.oauth.yml
-    - name: create /var/snap/maas/current/root/.ssh
+
+    - name: create /var/lib/maas/.ssh
       file:
-        path: /var/snap/maas/current/root/.ssh
+        path: /var/lib/maas/.ssh
         state: directory
+      become_user: maas
 
     - name: install libvirt
       apt:
@@ -52,7 +54,8 @@
       openssh_keypair:
         type: ecdsa
         size: 384
-        path: /var/snap/maas/current/root/.ssh/id_ecdsa
+        path: /var/lib/maas/.ssh/id_ecdsa
+      become_user: maas
       register: _id_ecdsa
 
     - name: allow maas key at root
