@@ -27,9 +27,6 @@
       register: _maas_config
       delegate_to: messy-maas
 
-    - debug:
-        var: _maas_config
-
     - name: set config
       uri:
         url: "{{ maas_base }}/MAAS/api/2.0/maas/?op=set_config"
@@ -42,6 +39,9 @@
         body_format: json
         return_content: true
       with_items: "{{ maas_config_params }}"
-      #when: XXX TODO
+      when: (_maas_config.results | json_query(content) | from_json != item.value)
+      vars:
+        content: "[?item.name=='{{ item.name }}'].content | [0]"
+      changed_when: true
       register: _set_maas_config
       delegate_to: messy-maas
