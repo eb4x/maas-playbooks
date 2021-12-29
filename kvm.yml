@@ -5,10 +5,10 @@
 
   vars:
     virt_nets:
-      - name: maas
-        iface: br-maas
-      - name: mgmt
-        iface: br-mgmt
+      - name: provision
+        iface: br-provision
+      - name: openstack
+        iface: br-openstack
 
   pre_tasks:
     - include_vars: settings.yml
