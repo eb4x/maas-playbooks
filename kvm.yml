@@ -54,16 +54,15 @@
   tasks:
     - name: generate ssh-key
       openssh_keypair:
-        type: ecdsa
-        size: 384
-        path: /var/lib/maas/.ssh/id_ecdsa
+        type: ed25519
+        path: /var/lib/maas/.ssh/id_ed25519
       become_user: maas
-      register: _id_ecdsa
+      register: _id_ed25519
 
     - name: allow maas key at root
       authorized_key:
         user: root
-        key: "{{ _id_ecdsa.public_key }} maas@{{ inventory_hostname }}"
+        key: "{{ _id_ed25519.public_key }} maas@{{ inventory_hostname }}"
 
     - name: get pods
       uri:
