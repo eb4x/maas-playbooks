@@ -18,7 +18,9 @@
       file:
         path: /var/lib/maas/.ssh
         state: directory
-      become_user: maas
+        owner: maas
+        group: maas
+        mode: '700'
 
     - name: install libvirt
       apt:
