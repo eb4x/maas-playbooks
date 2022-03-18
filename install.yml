@@ -6,13 +6,6 @@
   pre_tasks:
     - include_vars: settings.yml
 
-    - name: install postgresql and python3-psycopg2
-      apt:
-        name:
-          - acl
-          - postgresql
-          - python3-psycopg2
-
     - name: fix getaddrinfo for maas-proxy
       lineinfile:
         path: /etc/gai.conf
