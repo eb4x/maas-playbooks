@@ -5,7 +5,7 @@
 
   vars:
     virt_nets:
-      - name: provision
+      - name: maas
         iface: br-provision
       - name: openstack
         iface: br-openstack
