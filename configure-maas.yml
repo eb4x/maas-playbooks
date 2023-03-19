@@ -1,22 +1,21 @@
 ---
-- name: configure maas via api
+- name: configure maas via provisioner
   hosts:
-    - localhost
+    - provisioner
   gather_facts: false
 
   vars:
     maas_config_params:
+      #- { name: force_v1_network_yaml, value: false }
       - { name: kernel_opts, value: "console=tty1 console=ttyS0,115200n8" }
-      - { name: force_v1_network_yaml, value: false }
       - { name: network_discovery, value: disabled }
+      - { name: upstream_dns, value: "9.9.9.9 8.8.8.8" }
 
   pre_tasks:
     - include_vars: settings.yml
     - include_vars: settings.oauth.yml
 
   tasks:
-    - include_tasks: configure-maas-fabrics.yml
-
     - name: get config
       uri:
         url: "{{ maas_base }}/MAAS/api/2.0/maas/?op=get_config&name={{ item.name }}"
@@ -27,9 +26,10 @@
       loop_control:
         label: "{{ item.name }}"
       register: _maas_config
-      delegate_to: messy-maas
 
     - name: set config
+      when: (_maas_config.results | json_query(content) | from_json != item.value)
+      changed_when: true
       uri:
         url: "{{ maas_base }}/MAAS/api/2.0/maas/?op=set_config"
         method: POST
@@ -43,9 +43,9 @@
       with_items: "{{ maas_config_params }}"
       loop_control:
         label: "{{ item.name }}"
-      when: (_maas_config.results | json_query(content) | from_json != item.value)
       vars:
         content: "[?item.name=='{{ item.name }}'].content | [0]"
-      changed_when: true
-      register: _set_maas_config
-      delegate_to: messy-maas
+
+    - include_tasks: configure-maas-fabrics.yml
+      vars:
+        maas_network: "{{ hostvars['maas'].maas_network }}"
