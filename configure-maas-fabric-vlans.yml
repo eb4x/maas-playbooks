@@ -1,135 +1,193 @@
 ---
-- name: get vlans for {{ fabric }}
+- name: get existing vlans for {{ fabric }}
   uri:
     url: "{{ maas_base }}/MAAS/api/2.0/fabrics/{{ fabric_id }}/vlans/"
     headers:
       Authorization: "{{ Authorization }}"
     return_content: true
-  register: _fabric_vlans
-  delegate_to: messy-maas
+  register: _existing_vlans
 
-- name:
-  debug:
-    var: _fabric_vlans.json
-
-- name: create missing vlans
-  uri:
-    url: "{{ maas_base }}/MAAS/api/2.0/fabrics/{{ fabric_id }}/vlans/"
-    method: POST
-    headers:
-      Authorization: "{{ Authorization }}"
-    body:
-      name: "{{ hostvars['messy-maas'].maas.fabrics[fabric][vlan].name }}"
-      vid: "{{ vlan.split('.')[1] }}"
-      mtu: "{{ hostvars['messy-maas'].maas.fabrics[fabric][vlan].mtu | default(1500) }}"
-    body_format: json
-    return_content: true
-  with_items: "{{ hostvars['messy-maas'].maas.fabrics[fabric] }}"
-  loop_control:
-    loop_var: vlan
-  when:
-    - (vlan.split('.')[1] | int) not in (_fabric_vlans.json | json_query(get_vlan_ids))
+- name: modify vlans if needed
+  when: maas_network.fabrics[fabric] | map(attribute='id') | symmetric_difference(_existing_vlans.json | json_query(get_vlan_ids)) | length
   vars:
     get_vlan_ids: "[].vid"
-  register: _create_vlans
-  changed_when: true
-  delegate_to: messy-maas
+  block:
+    - name: remove vlans not in config
+      when:
+        - vlan.name != 'untagged'
+        - vlan.vid not in (maas_network.fabrics[fabric] | map(attribute='id'))
+      changed_when: true
+      uri:
+        url: "{{ maas_base }}/MAAS/api/2.0/fabrics/{{ fabric_id }}/vlans/{{ vlan.vid }}/"
+        method: DELETE
+        headers:
+          Authorization: "{{ Authorization }}"
+        status_code: [200, 204]
+      loop: "{{ _existing_vlans.json }}"
+      loop_control:
+        loop_var: vlan
 
-- debug:
-    var: _create_vlans
+    - name: create vlans from config
+      when: vlan.id not in (_existing_vlans.json | json_query(get_vlan_ids))
+      changed_when: true
+      uri:
+        url: "{{ maas_base }}/MAAS/api/2.0/fabrics/{{ fabric_id }}/vlans/"
+        method: POST
+        headers:
+          Authorization: "{{ Authorization }}"
+        body:
+          name: "{{ vlan.name }}"
+          vid: "{{ vlan.id }}"
+          mtu: "{{ vlan.mtu | default(1500) }}"
+        body_format: json
+      loop: "{{ maas_network.fabrics[fabric] }}"
+      loop_control:
+        loop_var: vlan
+
+    - name: refresh existing vlans for {{ fabric }}
+      uri:
+        url: "{{ maas_base }}/MAAS/api/2.0/fabrics/{{ fabric_id }}/vlans/"
+        headers:
+          Authorization: "{{ Authorization }}"
+        return_content: true
+      register: _refresh_vlans
+
+    - name: workaround skipped refresh
+      when: _refresh_vlans is not skipped
+      changed_when: true
+      set_fact:
+        _existing_vlans: "{{ _refresh_vlans }}"
+
+# XXX vlan.3 reports name 'untagged', but is named 'provision' in web-ui
+#- debug:
+#    var: _existing_vlans.json
 
 - name: update existing vlans
+  when:
+    - _existing_vlans.json | json_query(get_vlan_name) != vlan.name or
+      _existing_vlans.json | json_query(get_vlan_mtu) != vlan.mtu | default(1500)
+  changed_when: true
+#  debug:
+#    msg: |
+#      {{ _existing_vlans.json | json_query(get_vlan_name) }} ~ {{ vlan.name }}
+#      {{ _existing_vlans.json | json_query(get_vlan_mtu) }} ~ {{ vlan.mtu }}
   uri:
-    url: "{{ maas_base }}{{ _fabric_vlans.json | json_query(get_vlan_resource_uri) }}"
+    url: "{{ maas_base }}{{ _existing_vlans.json | json_query(get_vlan_resource_uri) }}"
     method: PUT
     headers:
       Authorization: "{{ Authorization }}"
     body:
-      vid: "{{ vlan.split('.')[1] }}"
-      name: "{{ hostvars['messy-maas'].maas.fabrics[fabric][vlan].name }}"
-      mtu: "{{ hostvars['messy-maas'].maas.fabrics[fabric][vlan].mtu | default(1500) }}"
+      vid: "{{ vlan.id }}"
+      name: "{{ vlan.name }}"
+      mtu: "{{ vlan.mtu | default(1500) }}"
     body_format: json
-    return_content: true
-  with_items: "{{ hostvars['messy-maas'].maas.fabrics[fabric] }}"
+  loop: "{{ maas_network.fabrics[fabric] }}"
   loop_control:
     loop_var: vlan
-  when:
-    - vlan not in (_create_vlans.results | json_query(get_created_vlans))
-    - hostvars['messy-maas'].maas.fabrics[fabric][vlan].name != (_fabric_vlans.json | json_query(get_vlan_name)) or
-      hostvars['messy-maas'].maas.fabrics[fabric][vlan].mtu | default(1500) != (_fabric_vlans.json | json_query(get_vlan_mtu))
   vars:
-    get_vlan_resource_uri: "[?vid==`{{ vlan.split('.')[1] }}`].resource_uri | [0]"
-    get_vlan_name: "[?vid==`{{ vlan.split('.')[1] }}`].name | [0]"
-    get_vlan_mtu: "[?vid==`{{ vlan.split('.')[1] }}`].mtu | [0]"
-    get_created_vlans: "[?changed==`true`].vlan"
-  changed_when: true
-  delegate_to: messy-maas
+    get_vlan_resource_uri: "[?vid==`{{ vlan.id }}`].resource_uri | [0]"
+    get_vlan_name: "[?vid==`{{ vlan.id }}`].name | [0]"
+    get_vlan_mtu: "[?vid==`{{ vlan.id }}`].mtu | [0]"
 
-- name: get subnets
+- name: get existing subnets
   uri:
     url: "{{ maas_base }}/MAAS/api/2.0/subnets/"
     headers:
       Authorization: "{{ Authorization }}"
     return_content: true
-  register: _subnets
-  delegate_to: messy-maas
+  register: _existing_subnets
 
-- name: create subnet
-  uri:
-    url: "{{ maas_base }}/MAAS/api/2.0/subnets/"
-    method: POST
-    headers:
-      Authorization: "{{ Authorization }}"
-    body:
-      cidr: "{{ hostvars['messy-maas'].maas.fabrics[fabric][vlan].subnet }}"
-      vid: "{{ vlan.split('.')[1] | int }}"
-    body_format: json
-    return_content: true
-  with_items: "{{ hostvars['messy-maas'].maas.fabrics[fabric] }}"
-  loop_control:
-    loop_var: vlan
-  when:
-    - hostvars['messy-maas'].maas.fabrics[fabric][vlan].subnet is defined
-    - hostvars['messy-maas'].maas.fabrics[fabric][vlan].subnet not in _subnets.json | json_query(get_subnet_cidrs)
+# NOTE we need cidrs from all fabrics in maas_network for subnet comparison
+- name: modify subnets if needed
+  when: maas_network.fabrics | json_query(all_fabric_cidrs) | symmetric_difference(_existing_subnets.json | json_query(existing_cidrs)) | length
   vars:
-    get_subnet_cidrs: "[].cidr"
-  changed_when: true
-  delegate_to: messy-maas
+    all_fabric_cidrs: "*[].subnet"
+    existing_cidrs: "[].cidr"
+  block:
+    - name: remove subnets not in config
+      when: subnet.cidr not in maas_network.fabrics | json_query(all_fabric_cidrs)
+      changed_when: true
+      uri:
+        url: "{{ maas_base }}/MAAS/api/2.0/subnets/{{ subnet.id }}/"
+        method: DELETE
+        headers:
+          Authorization: "{{ Authorization }}"
+        status_code: [200, 204]
+      loop: "{{ _existing_subnets.json }}"
+      loop_control:
+        loop_var: subnet
 
-- name: get ip ranges
+    - name: create subnet from config
+      when:
+        - vlan.subnet is defined
+        - vlan.subnet not in _existing_subnets.json | json_query(existing_cidrs)
+      changed_when: true
+      uri:
+        url: "{{ maas_base }}/MAAS/api/2.0/subnets/"
+        method: POST
+        headers:
+          Authorization: "{{ Authorization }}"
+        body:
+          fabric: "{{ fabric_id }}"
+          vid: "{{ vlan.id }}"
+          cidr: "{{ vlan.subnet }}"
+        body_format: json
+      loop: "{{ maas_network.fabrics[fabric] }}"
+      loop_control:
+        loop_var: vlan
+
+    - name: refresh existing subnets
+      uri:
+        url: "{{ maas_base }}/MAAS/api/2.0/subnets/"
+        headers:
+          Authorization: "{{ Authorization }}"
+        return_content: true
+      register: _refresh_subnets
+
+    - name: workaround skipped refresh
+      when: _refresh_subnets is not skipped
+      changed_when: true
+      set_fact:
+        _existing_subnets: "{{ _refresh_subnets }}"
+
+- name: get existing ip ranges
   uri:
     url: "{{ maas_base }}/MAAS/api/2.0/ipranges/"
     headers:
       Authorization: "{{ Authorization }}"
     return_content: true
-  register: _ip_ranges
-  delegate_to: messy-maas
+  register: _existing_ipranges
 
 # XXX this should get a better when condition
 #     I'm taking it for granted that there's only one range in a subnet.
-- name: create ip range
-  uri:
-    url: "{{ maas_base }}/MAAS/api/2.0/ipranges/"
-    method: POST
-    headers:
-      Authorization: "{{ Authorization }}"
-    body:
-      type: "{{ hostvars['messy-maas'].maas.fabrics[fabric][vlan].ip_range.type }}"
-      start_ip: "{{ hostvars['messy-maas'].maas.fabrics[fabric][vlan].ip_range.start_ip }}"
-      end_ip: "{{ hostvars['messy-maas'].maas.fabrics[fabric][vlan].ip_range.end_ip }}"
-      #subnet: "{{ hostvars['messy-maas'].maas.fabrics[fabric][vlan].subnet }}"
-    body_format: json
-    return_content: true
-  with_items: "{{ hostvars['messy-maas'].maas.fabrics[fabric] }}"
-  loop_control:
-    loop_var: vlan
-  when:
-    - hostvars['messy-maas'].maas.fabrics[fabric][vlan].ip_range is defined
-    - hostvars['messy-maas'].maas.fabrics[fabric][vlan].subnet not in (_ip_ranges.json | json_query(get_ip_range_cidrs))
+- name: modify ipranges
+  when: maas_network.fabrics | json_query(all_fabric_ipranges) | symmetric_difference(_existing_ipranges.json | json_query(existing_ipranges)) | length
   vars:
-    get_ip_range_cidrs: "[].subnet.cidr"
-  changed_when: true
-  delegate_to: messy-maas
+    all_fabric_ipranges: "*[].ip_range"
+    existing_ipranges: "[].{type: type, start_ip: start_ip, end_ip: end_ip}"
+  block:
+    - name: create ip range
+      when:
+        - vlan.ip_range is defined
+        - vlan.ip_range not in (_existing_ipranges.json | json_query(existing_ipranges))
+      changed_when: true
+      vars:
+        get_subnet_id: "[?cidr==`{{ vlan.subnet }}`].id | [0]"
+      uri:
+        url: "{{ maas_base }}/MAAS/api/2.0/ipranges/"
+        method: POST
+        headers:
+          Authorization: "{{ Authorization }}"
+        body:
+          type: "{{ vlan.ip_range.type }}"
+          start_ip: "{{ vlan.ip_range.start_ip }}"
+          end_ip: "{{ vlan.ip_range.end_ip }}"
+          subnet: "{{ _existing_subnets.json | json_query(get_subnet_id) }}"
+        body_format: json
+        return_content: true
+      loop: "{{ maas_network.fabrics[fabric] }}"
+      loop_control:
+        loop_var: vlan
 
 - name: get rackcontrollers
   uri:
@@ -138,28 +196,27 @@
       Authorization: "{{ Authorization }}"
     return_content: true
   register: _rackcontrollers
-  delegate_to: messy-maas
 
 - name: provide dhcp on vlans
+  when:
+    - vlan.dhcp_on | default(false) != _existing_vlans.json | json_query(get_vlan_dhcp_on)
+  changed_when: true
   uri:
-    url: "{{ maas_base }}{{ _fabric_vlans.json | json_query(get_vlan_resource_uri) }}"
+    url: "{{ maas_base }}{{ _existing_vlans.json | json_query(get_vlan_resource_uri) }}"
     method: PUT
     headers:
       Authorization: "{{ Authorization }}"
     body:
-      vid: "{{ vlan.split('.')[1] }}"
-      primary_rack: "{{ _rackcontrollers.json | json_query( \"[?hostname=='messy-maas'].system_id | [0]\" ) }}"
-      dhcp_on: "{{ hostvars['messy-maas'].maas.fabrics[fabric][vlan].dhcp_on }}"
+      vid: "{{ vlan.id }}"
+      primary_rack: "{{ _rackcontrollers.json | json_query(get_system_id) }}"
+      dhcp_on: "{{ vlan.dhcp_on | default(false) }}"
     body_format: json
     return_content: true
-  with_items: "{{ hostvars['messy-maas'].maas.fabrics[fabric] }}"
+  with_items: "{{ maas_network.fabrics[fabric] }}"
   loop_control:
     loop_var: vlan
-  when:
-    - hostvars['messy-maas'].maas.fabrics[fabric][vlan].dhcp_on | default(false)
-    - not (_fabric_vlans.json | json_query(get_vlan_dhcp_on))
   vars:
-    get_vlan_resource_uri: "[?vid==`{{ vlan.split('.')[1] }}`].resource_uri | [0]"
-    get_vlan_dhcp_on: "[?vid==`{{ vlan.split('.')[1] }}`].dhcp_on | [0]"
-  changed_when: true
-  delegate_to: messy-maas
+    # FIXME hardcoded hostname=='maas'
+    get_system_id: "[?hostname=='maas'].system_id | [0]"
+    get_vlan_resource_uri: "[?vid==`{{ vlan.id }}`].resource_uri | [0]"
+    get_vlan_dhcp_on: "[?vid==`{{ vlan.id }}`].dhcp_on | [0]"
