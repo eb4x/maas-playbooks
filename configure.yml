@@ -45,7 +45,3 @@
         label: "{{ item.name }}"
       vars:
         content: "[?item.name=='{{ item.name }}'].content | [0]"
-
-    - include_tasks: configure-maas-fabrics.yml
-      vars:
-        maas_network: "{{ hostvars['maas'].maas_network }}"

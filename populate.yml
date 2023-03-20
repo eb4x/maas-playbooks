@@ -1,0 +1,14 @@
+---
+- name: populate maas via provisioner
+  hosts:
+    - provisioner
+  gather_facts: false
+
+  pre_tasks:
+    - include_vars: settings.yml
+    - include_vars: settings.oauth.yml
+
+  tasks:
+    - include_tasks: configure-maas-fabrics.yml
+      vars:
+        maas_network: "{{ hostvars['maas'].maas_network }}"
