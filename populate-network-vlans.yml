@@ -1,0 +1,91 @@
+---
+- name: get existing subnets
+  uri:
+    url: "{{ maas_base }}/MAAS/api/2.0/subnets/"
+    headers:
+      Authorization: "{{ Authorization }}"
+    return_content: true
+  register: _existing_subnets
+
+- name: manipulate subnets
+  block:
+    - name: delete subnets
+      when: subnet.cidr not in all_maas_cidrs
+      changed_when: true
+      vars:
+        all_maas_vlans: "{{ fabrics | map(attribute='vlans') | flatten }}"
+        all_maas_subnets: "{{ all_maas_vlans | selectattr('subnets', 'defined') | map(attribute='subnets') | flatten }}"
+        all_maas_cidrs: "{{ all_maas_subnets | map(attribute='cidr') }}"
+      uri:
+        url: "{{ maas_base }}/MAAS/api/2.0/subnets/{{ subnet.id }}/"
+        method: DELETE
+        headers:
+          Authorization: "{{ Authorization }}"
+        status_code: [200, 204]
+      loop: "{{ _existing_subnets.json }}"
+      loop_control:
+        loop_var: subnet
+        label: "fabric: {{ subnet.vlan.fabric }}, vlan: {{ subnet.vlan.vid }}, subnet: {{ subnet.cidr }}"
+      register: _delete_subnets
+
+    - name: update subnets
+      when:
+        - subnet.cidr in existing_subnet_cidrs
+        - vlan.id != comparison_subnet.vlan.vid
+      changed_when: true
+      vars:
+        existing_subnet_cidrs: "{{ _existing_subnets.json | map(attribute='cidr') }}"
+        comparison_subnet: "{{ _existing_subnets.json | selectattr('cidr', 'eq', subnet.cidr) | first }}"
+      uri:
+        url: "{{ maas_base }}/MAAS/api/2.0/subnets/{{ comparison_subnet.id }}/"
+        method: PUT
+        headers:
+          Authorization: "{{ Authorization }}"
+        body:
+          vlan: "{{ (_existing_vlans.json | selectattr('vid', 'eq', vlan.id) | first).id }}"
+        body_format: json
+        return_content: true
+      loop: "{{ vlan.subnets }}"
+      loop_control:
+        loop_var: subnet
+      register: _update_subnets
+
+    - name: create subnets
+      when: subnet.cidr not in _existing_subnets.json | map(attribute='cidr')
+      changed_when: true
+      uri:
+        url: "{{ maas_base }}/MAAS/api/2.0/subnets/"
+        method: POST
+        headers:
+          Authorization: "{{ Authorization }}"
+        body:
+          fabric: "{{ (_existing_fabrics.json | selectattr('name', 'eq', fabric.name) | first).id }}"
+          vid: "{{ vlan.id }}"
+          cidr: "{{ subnet.cidr }}"
+        body_format: json
+      loop: "{{ vlan.subnets }}"
+      loop_control:
+        loop_var: subnet
+      register: _create_subnets
+
+    - name: refresh existing subnets
+      when: _create_subnets is changed or _update_subnets is changed or _delete_subnets is changed
+      uri:
+        url: "{{ maas_base }}/MAAS/api/2.0/subnets/"
+        headers:
+          Authorization: "{{ Authorization }}"
+        return_content: true
+      register: _refresh_subnets
+
+    - name: workaround skipped refresh
+      when: _refresh_subnets is not skipped
+      changed_when: true
+      set_fact:
+        _existing_subnets: "{{ _refresh_subnets }}"
+
+- name: populate each subnet with ipranges
+  when: subnet.ip_ranges is defined
+  include_tasks: populate-network-subnets.yml
+  loop: "{{ vlan.subnets }}"
+  loop_control:
+    loop_var: subnet

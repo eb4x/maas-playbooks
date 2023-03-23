@@ -9,6 +9,8 @@
     - include_vars: settings.oauth.yml
 
   tasks:
-    - include_tasks: configure-maas-fabrics.yml
+    - name: populate network with fabrics
+      include_tasks: populate-network.yml
       vars:
-        maas_network: "{{ hostvars['maas'].maas_network }}"
+        fabrics: "{{ hostvars['maas'].maas_network.fabrics }}"
+    #- include_tasks: populate-machines.yml

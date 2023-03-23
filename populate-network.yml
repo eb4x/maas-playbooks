@@ -1,0 +1,93 @@
+---
+- name: get existing fabrics
+  uri:
+    url: "{{ maas_base }}/MAAS/api/2.0/fabrics/"
+    headers:
+      Authorization: "{{ Authorization }}"
+    return_content: true
+  register: _existing_fabrics
+
+- name: manipulate fabrics
+  when: maas_fabric_names | symmetric_difference(existing_fabric_names) | length
+  vars:
+    maas_fabric_names: "{{ fabrics | map(attribute='name') + fabrics | selectattr('remap', 'defined') | map(attribute='remap') }}"
+    existing_fabric_names: "{{ _existing_fabrics.json | map(attribute='name') }}"
+  block:
+    - name: delete fabrics
+      when:
+        - fabric.name not in maas_fabric_names
+      changed_when: true
+      uri:
+        url: "{{ maas_base }}/MAAS/api/2.0/fabrics/{{ fabric.id }}/"
+        method: DELETE
+        headers:
+          Authorization: "{{ Authorization }}"
+        status_code: [200, 204]
+      loop: "{{ _existing_fabrics.json }}"
+      loop_control:
+        loop_var: fabric
+        label: "fabric: {{ fabric.name }}"
+      register: _delete_fabric
+
+    - name: update fabrics
+      when:
+        - fabric.remap is defined
+        - fabric.remap in existing_fabric_names
+      changed_when: true
+      vars:
+        comparison_fabric: "{{ _existing_fabrics.json | selectattr('name', 'eq', fabric.remap) | first }}"
+      uri:
+        url: "{{ maas_base }}/MAAS/api/2.0/fabrics/{{ comparison_fabric.id }}/"
+        method: PUT
+        headers:
+          Authorization: "{{ Authorization }}"
+        body:
+          name: "{{ fabric.name }}"
+        body_format: json
+      loop: "{{ maas_network.fabrics }}"
+      loop_control:
+        loop_var: fabric
+        label: "fabric: {{ fabric.name }}"
+      register: _update_fabric
+
+    - name: create fabrics
+      when:
+        - fabric.name not in existing_fabric_names
+        - fabric.remap | default('') not in existing_fabric_names
+      changed_when: true
+      uri:
+        url: "{{ maas_base }}/MAAS/api/2.0/fabrics/"
+        method: POST
+        headers:
+          Authorization: "{{ Authorization }}"
+        body:
+          name: "{{ fabric.name }}"
+        body_format: json
+      loop: "{{ fabrics }}"
+      loop_control:
+        loop_var: fabric
+        label: "fabric: {{ fabric.name }}"
+      register: _create_fabric
+
+    - name: refresh existing fabrics
+      when: _create_fabric is changed or _update_fabric is changed or _delete_fabric is changed
+      changed_when: true
+      uri:
+        url: "{{ maas_base }}/MAAS/api/2.0/fabrics/"
+        headers:
+          Authorization: "{{ Authorization }}"
+        return_content: true
+      register: _refresh_fabrics
+
+    - name: workaround skipped refresh
+      when: _refresh_fabrics is not skipped
+      changed_when: true
+      set_fact:
+        _existing_fabrics: "{{ _refresh_fabrics }}"
+
+- name: populate each fabric with vlans
+  when: fabric.vlans is defined
+  include_tasks: populate-network-fabrics.yml
+  loop: "{{ fabrics }}"
+  loop_control:
+    loop_var: fabric

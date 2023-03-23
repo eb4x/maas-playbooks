@@ -1,0 +1,59 @@
+---
+- name: get existing ip ranges
+  uri:
+    url: "{{ maas_base }}/MAAS/api/2.0/ipranges/"
+    headers:
+      Authorization: "{{ Authorization }}"
+    return_content: true
+  register: _existing_ipranges
+
+- name: manipulate ip ranges
+  block:
+    - name: delete ip ranges
+      when: ip_range | json_query(comparison_data) not in all_maas_ipranges
+      changed_when: true
+      vars:
+        comparison_data: "{type: type, start_ip: start_ip, end_ip: end_ip}"
+        all_maas_vlans: "{{ fabrics | map(attribute='vlans') | flatten }}"
+        all_maas_subnets: "{{ all_maas_vlans | selectattr('subnets', 'defined') | map(attribute='subnets') | flatten }}"
+        all_maas_ipranges: "{{ all_maas_subnets | selectattr('ip_ranges', 'defined') | map(attribute='ip_ranges') | flatten }}"
+      debug:
+        msg: "Delete this ip range {{ iprange }} not in {{ all_maas_ipranges }}"
+      #uri:
+      #  url: "{{ maas_base }}/MAAS/api/2.0/ipranges/{{ iprange.id }}/"
+      #  method: DELETE
+      #  headers:
+      #    Authorization: "{{ Authorization }}"
+      #  status_code: [200, 204]
+      loop: "{{ _existing_ipranges.json }}"
+      loop_control:
+        loop_var: ip_range
+      register: _delete_iprange
+
+    #- name: update ip ranges
+    #  debug:
+    #    msg: "TODO: ?"
+    #  register: _update_iprange
+
+    - name: create ip ranges
+      when: ip_range not in _existing_ipranges.json | json_query(comparison_list)
+      changed_when: true
+      vars:
+        comparison_list: "[].{type: type, start_ip: start_ip, end_ip: end_ip}"
+      uri:
+        url: "{{ maas_base }}/MAAS/api/2.0/ipranges/"
+        method: POST
+        headers:
+          Authorization: "{{ Authorization }}"
+        body:
+          subnet: "{{ (_existing_subnets.json | selectattr('cidr', 'eq', subnet.cidr)).id }}"
+          type: "{{ ip_range.type }}"
+          start_ip: "{{ ip_range.start_ip }}"
+          end_ip: "{{ ip_range.end_ip }}"
+        body_format: json
+        return_content: true
+      loop: "{{ subnet.ip_ranges }}"
+      loop_control:
+        loop_var: ip_range
+      register: _create_iprange
+

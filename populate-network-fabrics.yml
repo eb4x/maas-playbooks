@@ -1,0 +1,142 @@
+---
+- name: get existing vlans
+  vars:
+    comparison_fabric: "{{ _existing_fabrics.json | selectattr('name', 'eq', fabric.name) | first }}"
+  uri:
+    url: "{{ maas_base }}/MAAS/api/2.0/fabrics/{{ comparison_fabric.id }}/vlans/"
+    headers:
+      Authorization: "{{ Authorization }}"
+    return_content: true
+  register: _existing_vlans
+
+- name: manipulate vlans
+  vars:
+    existing_vlan_ids: "{{ _existing_vlans.json | map(attribute='vid') }}"
+    fabric_id: "{{ (_existing_fabrics.json | selectattr('name', 'eq', fabric_vlan.0.name) | first).id }}"
+  block:
+    - name: delete vlans
+      when:
+        - vlan.name != 'untagged'
+        - vlan.vid not in fabric.vlans | map(attribute='id')
+      changed_when: true
+      uri:
+        url: "{{ maas_base }}/MAAS/api/2.0/fabrics/{{ vlan.fabric_id }}/vlans/{{ vlan.vid }}/"
+        method: DELETE
+        headers:
+          Authorization: "{{ Authorization }}"
+        status_code: [200, 204]
+      loop: "{{ _existing_vlans.json }}"
+      loop_control:
+        loop_var: vlan
+        label: "fabric: {{ (_existing_fabrics.json | selectattr('id', 'eq', vlan.fabric_id) | first).name }}, vlan: {{ vlan.vid }}"
+      register: _delete_vlans
+
+    - name: update vlans
+      when:
+        - vlan.id in existing_vlan_ids
+        - vlan.name != comparison_vlan.name or
+          vlan.mtu | default(1500) != comparison_vlan.mtu
+      changed_when: true
+      vars:
+        comparison_vlan: "{{ _existing_vlans.json | selectattr('vid', 'eq', vlan.id) | first }}"
+      uri:
+        url: "{{ maas_base }}/MAAS/api/2.0/fabrics/{{ fabric_id }}/vlans/{{ fabric_vlan.1.id }}/"
+        method: PUT
+        headers:
+          Authorization: "{{ Authorization }}"
+        body:
+          name: "{{ vlan.name }}"
+          mtu: "{{ vlan.mtu | default(1500) }}"
+        body_format: json
+      loop: "{{ fabric.vlans }}"
+      loop_control:
+        loop_var: vlan
+        label: "fabric: {{ fabric.name }}, vlan: {{ vlan.id }}"
+      register: _update_vlans
+
+    - name: create vlans
+      when: vlan.id not in existing_vlan_ids
+      changed_when: true
+      vars:
+        fabric_id: "{{ (_existing_fabrics.json | selectattr('name', 'eq', fabric.name) | first).id }}"
+      uri:
+        url: "{{ maas_base }}/MAAS/api/2.0/fabrics/{{ fabric_id }}/vlans/"
+        method: POST
+        headers:
+          Authorization: "{{ Authorization }}"
+        body:
+          name: "{{ vlan.name }}"
+          vid: "{{ vlan.id }}"
+          mtu: "{{ vlan.mtu | default(1500) }}"
+        body_format: json
+      loop: "{{ fabric.vlans }}"
+      loop_control:
+        loop_var: vlan
+        label: "fabric: {{ fabric.name }}, vlan: {{ vlan.id }}"
+      register: _create_vlans
+
+    - name: refresh existing vlans
+      when: _create_vlans is changed or _update_vlans is changed or _delete_vlans is changed
+      vars:
+        comparison_fabric: "{{ _existing_fabrics.json | selectattr('name', 'eq', fabric.name) | first }}"
+      uri:
+        url: "{{ maas_base }}/MAAS/api/2.0/fabrics/{{ comparison_fabric.id }}/vlans/"
+        headers:
+          Authorization: "{{ Authorization }}"
+        return_content: true
+      loop: "{{ maas_network.fabrics }}"
+      loop_control:
+        loop_var: fabric
+        label: "fabric: {{ fabric.name }}"
+      register: _refresh_vlans
+
+    - name: workaround skipped refresh
+      when: _refresh_vlans is not skipped
+      changed_when: true
+      set_fact:
+        _existing_vlans:
+          json: "{{ _existing_vlans.json | default([]) + item.json }}"
+      loop: "{{ _refresh_vlans.results }}"
+      loop_control:
+        label: "fabric: {{ item.fabric.name }}"
+
+- name: populate each vlan with subnets
+  when: vlan.subnets is defined
+  include_tasks: populate-network-vlans.yml
+  loop: "{{ fabric.vlans }}"
+  loop_control:
+    loop_var: vlan
+
+- name: get rackcontrollers
+  uri:
+    url: "{{ maas_base }}/MAAS/api/2.0/rackcontrollers/"
+    headers:
+      Authorization: "{{ Authorization }}"
+    return_content: true
+  register: _rackcontrollers
+
+#- debug:
+#    var: _rackcontrollers.json
+
+- name: provide dhcp on vlans
+  when:
+    - vlan.dhcp_on | default(false) != (_existing_vlans.json | json_query(comparison_vlan)).dhcp_on
+  changed_when: true
+  vars:
+    fabric_id: "{{ (_existing_fabrics.json | selectattr('name', 'eq', fabric_vlan.0.name) | first).id }}"
+    # FIXME hardcoded hostname=='maas'
+    get_system_id: "[?hostname=='maas'].system_id | [0]"
+    comparison_vlan: "[?vid==`{{ vlan.id }}`] | [0]"
+  uri:
+    url: "{{ maas_base }}/MAAS/api/2.0/fabrics/{{ fabric_id }}/vlans/{{ vlan.id }}/"
+    method: PUT
+    headers:
+      Authorization: "{{ Authorization }}"
+    body:
+      primary_rack: "{{ _rackcontrollers.json | json_query(get_system_id) }}"
+      vid: "{{ vlan.id }}"
+      dhcp_on: "{{ vlan.dhcp_on | default(false) }}"
+    body_format: json
+  loop: "{{ fabric.vlans }}"
+  loop_control:
+    loop_var: vlan
